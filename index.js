@@ -1,93 +1,167 @@
+const fs = require('fs');
 const TelegramApi = require('node-telegram-bot-api')
-const fs = require('fs')
-const YandexTokenStrategy = require('passport-yandex-token');
-const passport = require('passport');
 
-// const Client = require('node-torrent');
-// const { info } = require('ya-disk');
-// const client = new Client({logLevel: 'TRACE',
-// downloadPath:'./uploads'
-// });
+const { YaDisk } = require('ya-disk-rest-api');
 const torrentStream = require('torrent-stream');
 
+const bot = new TelegramApi(process.env.TELEGRAM_BOT_API, { polling: true })
+const disk = new YaDisk(process.env.YANDEX_API_TOKEN);
 
+let pathDirectory = ''
+const hashDir = {}
 
-// const WebTorrent = require('webtorrent')
+const RETRY_COUNT = 3;
 
-// const client = new WebTorrent()
+const createDir = async (dir) => {
+  let count = RETRY_COUNT;
+  while (count > 0) {
+    try {
+      return await disk.createDir(dir);
+    } catch (error) {
+      console.log('error create dir request', dir)
+    }
 
+    count -= 1;
+  }
 
-const token = '6124645230:AAFcKrW5qXvcOOXK1ljc0GMrtTtwD3yWBAI'
-const login = 'lebedencko.k'
-const password = '14Eh1LQL'
-const API_TOKEN = 'y0_AgAAAAAGo3exAAkkQwAAAADcSoOBXi1f4aroR12UpQG3_vZPr6P7C1A'
-const YANDEX_CLIENT_ID = '2756f6ea939d4010afbb3e85eb1e9b89'
-const YANDEX_CLIENT_SECRET = '0b68bd85ac9649049c2795ac79791099'
-
-// passport.use(new YandexTokenStrategy({
-//   clientID: YANDEX_CLIENT_ID,
-//   clientSecret: YANDEX_CLIENT_SECRET,
-//   passReqToCallback: true
-// }, function(req, accessToken, refreshToken, profile, next) {
-// console.log(`profile = `, profile)
-
-// }));
-
-
-const bot = new TelegramApi(token, {polling: true})
-// const disk = new YandexDisk(login, password)
-bot.on('message', async msg => {
-  console.log(`msg = `, msg.text)
-  // const torrent = client.addTorrent(msg.text);
-  // passport.authenticate('yandex-token', (user) => {
-  //   console.log('user', user)
-  // })
-
-//   try {
-
-//   const { total_space, used_space } = await info(API_TOKEN);
-
-//   console.log(`
-// Total space: ${Math.round(total_space / 1000000000)}GB
-// Free space: ${Math.round((total_space - used_space) / 1000000)}MB
-// `);
-// } catch (error) {
-//   console.error(error);
-// }
-// console.log('torrent', torrent)
-  // torrent.on('complete', function() {
-  //   console.log('props!');
-
-  //   torrent.files.forEach(function(file) {
-  //     console.log(`file = `, file)
-  //       var newPath = './uploads/' + file.path;
-  //       fs.rename(file.path, newPath);
-  //       // while still seeding need to make sure file.path points to the right place
-  //       file.path = newPath;
-  //   });
-  // });
-  const engine = torrentStream(msg.text);
-
-engine.on('idle', function() {
-  // создать uploads, если нет
-  const dir = `./uploads/${engine.torrent.name}`
-  if (!fs.existsSync(dir)){
-    fs.mkdirSync(dir);
+  throw new Error('Too many retries create dir');
 }
-	engine.files.forEach(function(file) {
-		// stream is readable stream to containing the file content
-    const stream = file.createReadStream();
-    stream.pipe(fs.createWriteStream(`${dir}/${file.name}`));
-	});
+
+const uploadFile = async (path, fileToUpload) => {
+  let count = RETRY_COUNT;
+  while (count > 0) {
+    try {
+      const file = fileToUpload.createReadStream()
+      return await disk.upload({ path, file });
+    } catch (error) {
+      console.error('error upload file request', error);
+    }
+
+    count -= 1;
+  }
+
+  throw new Error('Too many retries upload file');
+}
+
+const createYaDir = async (files) => {
+  const filePathList = files.map(file => file.path)
+  for (let filePath of filePathList) {
+    let localPath = ''
+    const currentFilePath = filePath.split('/').slice(0, -1)
+    for (let path of currentFilePath) {
+      localPath += `/${path}`
+      if (!hashDir[localPath]) {
+        hashDir[localPath] = localPath
+        await createDir(`${pathDirectory}${localPath}`)
+        console.log('path', `${pathDirectory}${localPath}`)
+      }
+    }
+  }
+}
+
+// engine.torrent.name
+const makeYaDir = async (names) => {
+
+  let dir = path
+  // console.log('names', names)
+  for (let name of names) {
+    if (hashDir[dir]) {
+      continue
+    }
+
+    dir += `/${name}`
+    // setTimeout(async () => {
+    try {
+      // const isDirExist = await disk.isDirExist(dir)
+      // console.log('dir', dir, 'isDirExist', isDirExist)
+      console.log('name', name)
+      console.log('dir', dir,)
+      // if (!isDirExist) {
+      // await createDir(dir)
+      // }
+    } catch (error) {
+      // console.log('error makeYaDir', error)
+    }
+    // }, 1000);
+    hashDir[dir] = true
+  }
+  console.log('hashDir', hashDir)
+  return dir
+}
+
+const makeLocalDir = (name) => {
+  const dir = `./uploads/${name}`
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir);
+  }
+  return dir
+}
+
+const saveLocalFile = (dir, file) => {
+  const stream = file.createReadStream();
+  stream.pipe(fs.createWriteStream(`${dir}/${file.name}`));
+  console.log('file.name', file.name)
+}
+
+bot.setMyCommands([
+  { command: '/download', description: 'Загрузить файл по magnet ссылки' },
+])
+
+bot.onText(/^\/download$/, function (msg) {
+  const opts = {
+    reply_markup: {
+      resize_keyboard: true,
+      one_time_keyboard: true,
+      keyboard: [
+        [{ text: 'Обучение' }, { text: 'Видео' }],
+        [{ text: 'Книги' }, { text: 'Программы' }]
+      ],
+    }
+  };
+
+  bot.sendMessage(msg.chat.id, "Прикрепи magnet-ссылку для скачикания", opts);
 });
 
-  // client.add(msg.text, torrent => {
-  //   // Got torrent metadata!
-  //   console.log('Client is downloading:', torrent.infoHash)
+bot.onText(/^Обучение$/, async msg => {
+  const chatId = msg.chat.id
+  pathDirectory = '/Kirill/learn'
+  bot.sendMessage(chatId, 'Вставь magnet-ссылку на файл');
+})
 
-  //   for (const file of torrent.files) {
-  //     console.log(`file = `, file)
-  //     // document.body.append(file.name)
-  //   }
-  // })
+bot.onText(/^Видео$/, async msg => {
+  const chatId = msg.chat.id
+  pathDirectory = '/Kirill/video'
+  bot.sendMessage(chatId, 'Вставь magnet-ссылку на файл');
+})
+
+bot.onText(/^Книги$/, async msg => {
+  const chatId = msg.chat.id
+  pathDirectory = '/Kirill/books'
+  bot.sendMessage(chatId, 'Вставь magnet-ссылку на файл');
+})
+
+bot.onText(/^Программы$/, async msg => {
+  const chatId = msg.chat.id
+  pathDirectory = '/Kirill/programs'
+  bot.sendMessage(chatId, 'Вставь magnet-ссылку на файл');
+})
+
+bot.onText(/^magnet/, async msg => {
+  const chatId = msg.chat.id
+
+  // if (!path.length) {
+  //   bot.sendMessage(msg.chat.id, "Выбери, где будет лежать файл");
+  //   return
+  // }
+
+  const engine = torrentStream(msg.text);
+  engine.on('ready', async function (props) {
+    // console.log('engine', engine.torrent.length);
+    await createYaDir(engine.files)
+    for (const file of engine.files) {
+      console.log('start load', file.path)
+      await uploadFile(`${pathDirectory}/${file.path}`, file)
+      console.log('end load', file.path)
+    }
+  });
 })

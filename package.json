@@ -11,13 +11,8 @@
   "license": "ISC",
   "dependencies": {
     "node-telegram-bot-api": "^0.61.0",
-    "node-torrent": "^0.2.2",
-    "passport": "^0.6.0",
-    "passport-yandex-token": "^2.1.0",
     "torrent-stream": "^1.2.1",
-    "webtorrent": "^2.0.13",
-    "ya-disk": "^4.0.1",
-    "yandex-disk": "^0.0.8"
+    "ya-disk-rest-api": "^1.1.2"
   },
   "devDependencies": {
     "nodemon": "^2.0.20"
