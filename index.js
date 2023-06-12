@@ -119,7 +119,7 @@ bot.onText(/^\/download$/, function (msg) {
     }
   };
 
-  bot.sendMessage(msg.chat.id, "Прикрепи magnet-ссылку для скачикания", opts);
+  bot.sendMessage(msg.chat.id, "Прикрепи magnet-ссылку для скачивания", opts);
 });
 
 bot.onText(/^Обучение$/, async msg => {
@@ -147,12 +147,29 @@ bot.onText(/^Программы$/, async msg => {
 })
 
 bot.onText(/^magnet/, async msg => {
+
   const chatId = msg.chat.id
 
-  // if (!path.length) {
-  //   bot.sendMessage(msg.chat.id, "Выбери, где будет лежать файл");
-  //   return
-  // }
+  if (msg.text.match(/magnet:\?xt=urn:[a-z0-9]+:[a-z0-9]{32}/i) === null) {
+    bot.sendMessage(msg.chat.id, "Добавь magnet-ссылку");
+    return
+  }
+
+  if (!pathDirectory.length) {
+    const opts = {
+      reply_markup: {
+        resize_keyboard: true,
+        one_time_keyboard: true,
+        keyboard: [
+          [{ text: 'Обучение' }, { text: 'Видео' }],
+          [{ text: 'Книги' }, { text: 'Программы' }]
+        ],
+      }
+    };
+
+    bot.sendMessage(msg.chat.id, "Выбери директорию", opts);
+    return
+  }
 
   const engine = torrentStream(msg.text);
   engine.on('ready', async function (props) {
